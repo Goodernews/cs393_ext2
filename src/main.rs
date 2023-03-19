@@ -2,12 +2,12 @@
 
 mod structs;
 use crate::structs::{BlockGroupDescriptor, DirectoryEntry, Inode, Superblock};
-use std::mem;
 use null_terminated::NulStr;
+use rustyline::{DefaultEditor, Result};
+use std::fmt;
+use std::mem;
 use uuid::Uuid;
 use zerocopy::ByteSlice;
-use std::fmt;
-use rustyline::{DefaultEditor, Result};
 
 #[repr(C)]
 #[derive(Debug)]
@@ -95,12 +95,12 @@ impl Ext2 {
         let index: usize = (inode - 1) % self.superblock.inodes_per_group as usize;
 
         // println!("in get_inode, inode num = {}, index = {}, group = {}", inode, index, group);
-        let inode_table_block = (self.block_groups[group].inode_table_block) as usize - self.block_offset;
+        let inode_table_block =
+            (self.block_groups[group].inode_table_block) as usize - self.block_offset;
         // println!("in get_inode, block number of inode table {}", inode_table_block);
         let inode_table = unsafe {
             std::slice::from_raw_parts(
-                self.blocks[inode_table_block].as_ptr()
-                    as *const Inode,
+                self.blocks[inode_table_block].as_ptr() as *const Inode,
                 self.superblock.inodes_per_group as usize,
             )
         };
@@ -117,29 +117,28 @@ impl Ext2 {
         // println!("following direct pointer to data block: {}", root.direct_pointer[0]);
         let entry_ptr = self.blocks[root.direct_pointer[0] as usize - self.block_offset].as_ptr();
         let mut byte_offset: isize = 0;
-        while byte_offset < root.size_low as isize { // <- todo, support large directories
-            let directory = unsafe { 
-                &*(entry_ptr.offset(byte_offset) as *const DirectoryEntry) 
-            };
+        while byte_offset < root.size_low as isize {
+            // <- todo, support large directories
+            let directory = unsafe { &*(entry_ptr.offset(byte_offset) as *const DirectoryEntry) };
             // println!("{:?}", directory);
             byte_offset += directory.entry_size as isize;
             ret.push((directory.inode as usize, &directory.name));
-        } 
+        }
         Ok(ret)
     }
 }
 
-impl fmt::Debug for Inode<> {
+impl fmt::Debug for Inode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.size_low == 0 && self.size_high == 0 {
             f.debug_struct("").finish()
         } else {
             f.debug_struct("Inode")
-            .field("type_perm", &self.type_perm)
-            .field("size_low", &self.size_low)
-            .field("direct_pointers", &self.direct_pointer)
-            .field("indirect_pointer", &self.indirect_pointer)
-            .finish()
+                .field("type_perm", &self.type_perm)
+                .field("size_low", &self.size_low)
+                .field("direct_pointers", &self.direct_pointer)
+                .field("indirect_pointer", &self.indirect_pointer)
+                .finish()
         }
     }
 }
@@ -149,15 +148,13 @@ fn main() -> Result<()> {
     let start_addr: usize = disk.as_ptr() as usize;
     let ext2 = Ext2::new(&disk[..], start_addr);
 
-    let mut current_working_inode:usize = 2;
+    let mut current_working_inode: usize = 2;
 
     let mut rl = DefaultEditor::new()?;
     loop {
         // fetch the children of the current working directory
         let dirs = match ext2.read_dir_inode(current_working_inode) {
-            Ok(dir_listing) => {
-                dir_listing
-            },
+            Ok(dir_listing) => dir_listing,
             Err(_) => {
                 println!("unable to read cwd");
                 break;
@@ -172,7 +169,7 @@ fn main() -> Result<()> {
                 for dir in &dirs {
                     print!("{}\t", dir.1);
                 }
-                println!();    
+                println!();
             } else if line.starts_with("cd") {
                 // `cd` with no arguments, cd goes back to root
                 // `cd dir_name` moves cwd to that directory
@@ -202,10 +199,36 @@ fn main() -> Result<()> {
                 // consider supporting `-p path/to_file` to create a path of directories
                 println!("mkdir not yet implemented");
             } else if line.starts_with("cat") {
+                let elts: Vec<&str> = line.split(' ').collect();
+                if elts.len() > 2 {
+                    print!("Uh oh, cat can only take one argument!");
+                } else if elts.len() == 1 {
+                    print!("Pass a filename to be catted!");
+                } else {
+                    let filename = elts[1];
+                    // Check if present
+                    let mut found: bool = false;
+                    for dir in &dirs {
+                        if dir.1.to_string().eq(filename) {
+                            found = true;
+                            let file_inode = dir.0;
+                            // ext2.read_dir_inode() // check if file
+                            if true {
+                                print!("{}", filename) //Ex2.get_inode(file_inode).uid)
+                            } else {
+                                println!("{} is not a printable file.", filename);
+                            }
+                        }
+                    }
+                    if !found {
+                        println!("{} is not in the current directory", filename)
+                    }
+                };
                 // `cat filename`
                 // print the contents of filename to stdout
                 // if it's a directory, print a nice error
-                println!("cat not yet implemented");
+                //
+                println!(""); // Uh, it doesn't print anything if this is missing
             } else if line.starts_with("rm") {
                 // `rm target`
                 // unlink a file or empty directory
