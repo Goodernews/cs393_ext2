@@ -199,6 +199,7 @@ pub struct DirectoryEntry {
 }
 
 #[derive(Debug)]
+
 pub enum TypeIndicator {
     Unknown,
     Regular,

@@ -1,7 +1,7 @@
 #![feature(int_roundings)]
 
 mod structs;
-use crate::structs::{BlockGroupDescriptor, DirectoryEntry, Inode, Superblock};
+use crate::structs::{BlockGroupDescriptor, DirectoryEntry, Inode, Superblock, TypeIndicator};
 use null_terminated::NulStr;
 use rustyline::{DefaultEditor, Result};
 use std::fmt;
@@ -94,7 +94,10 @@ impl Ext2 {
         let group: usize = (inode - 1) / self.superblock.inodes_per_group as usize;
         let index: usize = (inode - 1) % self.superblock.inodes_per_group as usize;
 
-        // println!("in get_inode, inode num = {}, index = {}, group = {}", inode, index, group);
+        println!(
+            "in get_inode, inode num = {}, index = {}, group = {}",
+            inode, index, group
+        );
         let inode_table_block =
             (self.block_groups[group].inode_table_block) as usize - self.block_offset;
         // println!("in get_inode, block number of inode table {}", inode_table_block);
@@ -123,6 +126,39 @@ impl Ext2 {
             // println!("{:?}", directory);
             byte_offset += directory.entry_size as isize;
             ret.push((directory.inode as usize, &directory.name));
+        }
+        Ok(ret)
+    }
+    pub fn read_file(&self, inode: usize) {
+        let root = self.get_inode(inode);
+        let entry_ptr = self.blocks[root.direct_pointer[0] as usize - self.block_offset].as_ptr();
+
+        let idea = unsafe { &*(entry_ptr.offset(-8) as *const DirectoryEntry) };
+        println!("{}", &idea.name);
+        println!("proij");
+    }
+    pub fn type_and_data(&self, inode: usize) -> std::io::Result<Vec<(usize, bool, &NulStr, u16)>> {
+        let mut ret = Vec::new();
+        let root = self.get_inode(inode);
+        // println!("in read_dir_inode, #{} : {:?}", inode, root);
+        // println!("following direct pointer to data block: {}", root.direct_pointer[0]);
+        let entry_ptr = self.blocks[root.direct_pointer[0] as usize - self.block_offset].as_ptr();
+        let mut byte_offset: isize = 0;
+        while byte_offset < root.size_low as isize {
+            // <- todo, support large directories
+            let directory = unsafe { &*(entry_ptr.offset(byte_offset) as *const DirectoryEntry) };
+            println!("{:?}", directory);
+            byte_offset += directory.entry_size as isize;
+            ret.push((
+                directory.inode as usize,
+                match directory.type_indicator {
+                    // check if printable
+                    TypeIndicator::Regular => true,
+                    _ => false,
+                },
+                &directory.name,
+                directory.entry_size,
+            ));
         }
         Ok(ret)
     }
@@ -207,16 +243,27 @@ fn main() -> Result<()> {
                 } else {
                     let filename = elts[1];
                     // Check if present
+                    let cat_dirs = match ext2.type_and_data(current_working_inode) {
+                        Ok(dir_listing) => dir_listing,
+                        Err(_) => {
+                            println!("unable to read file");
+                            break;
+                        }
+                    };
                     let mut found: bool = false;
-                    for dir in &dirs {
-                        if dir.1.to_string().eq(filename) {
+                    for dir in &cat_dirs {
+                        if dir.2.to_string().eq(filename) {
                             found = true;
-                            let file_inode = dir.0;
-                            // ext2.read_dir_inode() // check if file
-                            if true {
-                                print!("{}", filename) //Ex2.get_inode(file_inode).uid)
+
+                            if dir.1 {
+                                let file_inode = dir.0;
+                                //ext2.get_inode(file_inode);
+                                ext2.read_file(file_inode);
+                                print!("{}", filename); //print file
+                                break;
                             } else {
                                 println!("{} is not a printable file.", filename);
+                                break;
                             }
                         }
                     }
